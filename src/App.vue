@@ -39,16 +39,49 @@ const currentPosition = reactive({ x: 0, y: 0 })
 const pageRef = ref<HTMLElement | null>(null)
 const showTooltip = ref(false)
 const tooltipPosition = reactive({ x: 0, y: 0 })
-const rangeMin = 0
-const rangeMax = 100
-const rangeStep = 0.5
 
 const a4WidthMm = 210
 const a4HeightMm = 297
+const rangeMinWidth = 0
+const rangeMaxWidth = a4WidthMm
+const rangeMinHeight = 0
+const rangeMaxHeight = a4HeightMm
+const rangeStep = 0.5
 
 const fontSize = ref(12)
 const isNoBackgroundPrint = ref(false)
 const isShowPreviousPosition = ref(true)
+const isTextOnly = ref(false)
+const isHidenUI = ref(false)
+
+// Init from URL params, setting options
+const urlParams = new URLSearchParams(window.location.search)
+const positionListParam = urlParams.get('positions')
+const autoPrint = urlParams.get('autoPrint')
+const textOnlyParam = urlParams.get('textOnly')
+const hiddenUIParam = urlParams.get('hideUI')
+if (positionListParam) {
+  // base64 decode
+  newPostionListString.value = atob(positionListParam)
+  confirmNewPostionList()
+}
+
+if (autoPrint === '1') {
+  onMounted(() => {
+    setTimeout(() => {
+      window.print()
+    }, 1000)
+  })
+}
+
+if (textOnlyParam === '1') {
+  isTextOnly.value = true
+  isShowPreviousPosition.value = false
+}
+
+if (hiddenUIParam === '1') {
+  isHidenUI.value = true
+}
 
 // Computed
 const styleComputed = computed(() => ({
@@ -146,7 +179,7 @@ function showDialog(): void {
   }
 }
 
-function confirmNewPostionList(): void {
+function confirmNewPostionList(option?: { closeDialog?: boolean }): void {
   if (!newPostionListString.value) {
     /* empty */
   }
@@ -167,7 +200,7 @@ function confirmNewPostionList(): void {
   }
   newPostionListString.value = ''
   positionListBackup.value = structuredClone(toRaw(positionList.value))
-  if (dialog.value) {
+  if (option?.closeDialog && dialog.value) {
     dialog.value.close()
   }
 }
@@ -224,25 +257,6 @@ function removePosition(posIndex: number): void {
   )
 }
 
-function calculatePositionFromEvent(
-  evt: MouseEvent,
-): { xMM: number, yMM: number } | undefined {
-  if (!pageRef.value || !selectedImage.value)
-    return
-  const pageWidth = pageRef.value.clientWidth
-  const pageHeight = pageRef.value.clientHeight
-  const rectPage = pageRef.value.getBoundingClientRect()
-  const offsetX = evt.clientX - rectPage.left
-  const offsetY = evt.clientY - rectPage.top
-  // console.log({ offsetX, offsetY, pageWidth, pageHeight, rect })
-  const fixedDecimal = 2
-  // const xPercent = ((offsetX / pageWidth) * 100).toFixed(fixedDecimal)
-  // const yPercent = ((offsetY / pageHeight) * 100).toFixed(fixedDecimal)
-  const xMM = +((offsetX / pageWidth) * a4WidthMm).toFixed(fixedDecimal)
-  const yMM = +((offsetY / pageHeight) * a4HeightMm).toFixed(fixedDecimal)
-  return { xMM, yMM }
-}
-
 function copyPosition(text: string) {
   if (!text) {
     /* empty */
@@ -254,9 +268,9 @@ function copyPosition(text: string) {
   alert('copy success!')
 }
 
-const onMouseMoveDebounce = debounce(onMouseMove, 200)
+const onMouseMoveDebounce = debounce(onMouseMovePage, 200)
 
-function onMouseMove(evt: MouseEvent): void {
+function onMouseMovePage(evt: MouseEvent): void {
   if (!pageRef.value || !selectedImage.value)
     return
   const { xMM, yMM } = calculatePositionFromEvent(evt) || {
@@ -267,13 +281,14 @@ function onMouseMove(evt: MouseEvent): void {
   currentPosition.y = yMM
 }
 
-function onMouseOver(): void {
+function onMouseOverPage(): void {
   if (!pageRef.value || !selectedImage.value)
     return
   showTooltip.value = true
 }
 
-function onMouseDown(evt: MouseEvent): void {
+// click to add position
+function onMouseDownPage(evt: MouseEvent): void {
   evt.preventDefault()
   if (!pageRef.value || !selectedImage.value)
     return
@@ -298,16 +313,31 @@ function onMouseDown(evt: MouseEvent): void {
   })
 }
 
-function onMouseOut(evt: MouseEvent): void {
+function onMouseOutPage(evt: MouseEvent): void {
   if ((evt.relatedTarget as HTMLElement)?.className === 'tooltip') {
     return
   }
   showTooltip.value = false
 }
 
-// function onContextmenu() {
-
-// }
+function calculatePositionFromEvent(
+  evt: MouseEvent,
+): { xMM: number, yMM: number } | undefined {
+  if (!pageRef.value || !selectedImage.value)
+    return
+  const pageWidth = pageRef.value.clientWidth
+  const pageHeight = pageRef.value.clientHeight
+  const rectPage = pageRef.value.getBoundingClientRect()
+  const offsetX = evt.clientX - rectPage.left
+  const offsetY = evt.clientY - rectPage.top
+  // console.log({ offsetX, offsetY, pageWidth, pageHeight, rect })
+  const fixedDecimal = 2
+  // const xPercent = ((offsetX / pageWidth) * 100).toFixed(fixedDecimal)
+  // const yPercent = ((offsetY / pageHeight) * 100).toFixed(fixedDecimal)
+  const xMM = +((offsetX / pageWidth) * a4WidthMm).toFixed(fixedDecimal)
+  const yMM = +((offsetY / pageHeight) * a4HeightMm).toFixed(fixedDecimal)
+  return { xMM, yMM }
+}
 
 function calculateTooltipPosition(evt: MouseEvent): { x: number, y: number } {
   if (!pageRef.value || !selectedImage.value)
@@ -321,6 +351,7 @@ function calculateTooltipPosition(evt: MouseEvent): { x: number, y: number } {
   return { x, y }
 }
 
+// Dragging point logic
 const isDraggingPoint = ref<boolean>(false)
 const offsetPostion = ref<{ x: number, y: number }>({
   x: 0,
@@ -373,7 +404,7 @@ function calculatePositionBoxFromEvent(
   // const yPercent = ((offsetY / pageHeight) * 100).toFixed(fixedDecimal)
   const xMM = +((offsetX / pageWidth) * a4WidthMm).toFixed(fixedDecimal)
   const yMM = +((offsetY / pageHeight) * a4HeightMm).toFixed(fixedDecimal)
-  console.log(`Position: ${xMM}mm, ${yMM}mm`)
+  // console.warn(`Position: ${xMM}mm, ${yMM}mm`)
   return { xMM, yMM }
 }
 
@@ -394,12 +425,14 @@ function windowsMouseMove(evt: MouseEvent): void {
 
 onMounted(() => {
   if (pageRef?.value) {
+    // for tooltip position
     pageRef.value.addEventListener('mousemove', windowsMouseMove)
   }
 })
 
 onUnmounted(() => {
   if (pageRef?.value) {
+    // for tooltip position
     pageRef.value.removeEventListener('mousemove', windowsMouseMove)
   }
 })
@@ -410,7 +443,7 @@ onUnmounted(() => {
     <h1 class="title noprint">
       <span>A4</span> Document Position Editor.
     </h1>
-    <div class="noprint">
+    <div v-if="!isHidenUI" class="noprint">
       <ol>
         <li>Upload A4 image (.png, .jpg).</li>
         <li>Upload Position or create new by click on image.</li>
@@ -419,7 +452,7 @@ onUnmounted(() => {
         <li>Copy JSON position list.</li>
       </ol>
     </div>
-    <div class="action-wrapper noprint">
+    <div v-if="!isHidenUI" class="action-wrapper noprint">
       <div class="fileupload-wrapper noprint">
         <input
           id="image_uploads"
@@ -451,16 +484,16 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-    <div class="main">
+    <div class="main" :class="[isHidenUI ? 'hide-ui' : '']">
       <div
         ref="pageRef"
         class="page a4"
         :class="[isNoBackgroundPrint ? 'no-print-background' : '']"
         :style="styleComputed"
         @mousemove="onMouseMoveDebounce"
-        @mousedown="onMouseDown"
-        @mouseout="onMouseOut"
-        @mouseover="onMouseOver"
+        @mousedown="onMouseDownPage"
+        @mouseout="onMouseOutPage"
+        @mouseover="onMouseOverPage"
         @contextmenu.prevent
       >
         <template v-if="isShowPreviousPosition">
@@ -478,7 +511,9 @@ onUnmounted(() => {
           :key="pos.no"
           class="point"
           :style="{ left: `${pos.xMM}mm`, top: `${pos.yMM}mm`, fontSize: `${fontSize}px` }"
-          :class="[isDraggingPoint && draggingPosition?.no === pos.no ? 'is-draging' : '']"
+          :class="[isDraggingPoint && draggingPosition?.no === pos.no ? 'is-draging' : '',
+                   isTextOnly ? 'text-only' : '',
+          ]"
           :title="`(${pos.xMM}mm, ${pos.yMM}mm)`"
           @mousedown="onMouseDownPoint($event, pos)"
         >
@@ -488,7 +523,7 @@ onUnmounted(() => {
       <div v-show="showTooltip" class="tooltip" :style="tooltipPositionStyle">
         ({{ currentPosition.x }}mm, {{ currentPosition.y }}mm)
       </div>
-      <div class="card-wrapper noprint">
+      <div v-if="!isHidenUI" class="card-wrapper noprint">
         <div class="label-wrapper">
           <div class="label noprint">
             POSITION LIST
@@ -524,15 +559,15 @@ onUnmounted(() => {
               <input
                 v-model="card.xMM"
                 type="number"
-                :min="rangeMin"
-                :max="rangeMax"
+                :min="rangeMinWidth"
+                :max="rangeMaxWidth"
                 :step="rangeStep"
               >
               <input
                 v-model="card.xMM"
                 type="range"
-                :min="rangeMin"
-                :max="rangeMax"
+                :min="rangeMinWidth"
+                :max="rangeMaxWidth"
                 :step="rangeStep"
               >
             </div>
@@ -540,15 +575,15 @@ onUnmounted(() => {
               <input
                 v-model="card.yMM"
                 type="number"
-                :min="rangeMin"
-                :max="rangeMax"
+                :min="rangeMinHeight"
+                :max="rangeMaxHeight"
                 :step="rangeStep"
               >
               <input
                 v-model="card.yMM"
                 type="range"
-                :min="rangeMin"
-                :max="rangeMax"
+                :min="rangeMinHeight"
+                :max="rangeMaxHeight"
                 :step="rangeStep"
               >
             </div>
@@ -683,44 +718,46 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-    <div class="label-wrapper noprint">
-      <div class="label">
-        <div>JSON</div>
-      </div>
-      <button
-        class="button icon"
-        :disabled="!positionListString"
-        @click="copyPosition(positionListString)"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="1em"
-          height="1em"
-          viewBox="0 0 24 24"
+    <div v-if="!isHidenUI">
+      <div class="label-wrapper noprint">
+        <div class="label">
+          <div>JSON</div>
+        </div>
+        <button
+          class="button icon"
+          :disabled="!positionListString"
+          @click="copyPosition(positionListString)"
         >
-          <path
-            fill="currentColor"
-            fill-rule="evenodd"
-            d="M3 3a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H5v12a1 1 0 1 1-2 0zm4 4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v12a3 3 0 0 1-3 3h-8a3 3 0 0 1-3-3z"
-            clip-rule="evenodd"
-          />
-        </svg>
-        Copy
-      </button>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="1em"
+            height="1em"
+            viewBox="0 0 24 24"
+          >
+            <path
+              fill="currentColor"
+              fill-rule="evenodd"
+              d="M3 3a1 1 0 0 1 1-1h12a1 1 0 1 1 0 2H5v12a1 1 0 1 1-2 0zm4 4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v12a3 3 0 0 1-3 3h-8a3 3 0 0 1-3-3z"
+              clip-rule="evenodd"
+            />
+          </svg>
+          Copy
+        </button>
+      </div>
+      <textarea
+        id="json-list"
+        v-model="positionListString"
+        name="json-list"
+        cols="30"
+        rows="10"
+        class="noprint"
+        style="width: 100%"
+      />
     </div>
-    <textarea
-      id="json-list"
-      v-model="positionListString"
-      name="json-list"
-      cols="30"
-      rows="10"
-      class="noprint"
-      style="width: 100%"
-    />
     <CustomDialog
       ref="dialog"
       :is-confirm-auto-close="false"
-      @confirm="confirmNewPostionList"
+      @confirm="confirmNewPostionList({ closeDialog: true })"
     >
       <div class="label-wrapper">
         <div class="label noprint">
@@ -761,6 +798,10 @@ onUnmounted(() => {
   grid-template-rows: 1fr;
   background: transparent;
   padding: 1rem;
+
+  &.hide-ui {
+    grid-template-columns: 1fr
+  }
 }
 
 .title {
@@ -1055,6 +1096,14 @@ onUnmounted(() => {
     height: 16px;
     cursor: pointer;
   }
+}
+
+.text-only {
+  background-color: transparent !important;
+  color: black !important;
+  border: solid 1px;
+  text-shadow: none !important;
+  padding: 0 !important;
 }
 
 @media screen and (max-width: 1200px) {
