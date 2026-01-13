@@ -53,6 +53,18 @@ const isNoBackgroundPrint = ref(false)
 const isShowPreviousPosition = ref(true)
 const isTextOnly = ref(false)
 const isHidenUI = ref(false)
+const noBorderBoxPrint = ref(false)
+const fontsList = ref<string[]>([
+  'Open Sans, sans-serif',
+  'Arial, sans-serif',
+  'Courier New, sans-serif',
+  'Cordia New, sans-serif',
+  'Tahoma, sans-serif',
+  'Angsana New, sans-serif',
+  'system-ui, sans-serif',
+])
+const selectedFont = ref(fontsList.value[0])
+const lineHeight = ref('1')
 
 // Init from URL params, setting options
 const urlParams = new URLSearchParams(window.location.search)
@@ -60,9 +72,12 @@ const positionListParam = urlParams.get('positions')
 const autoPrint = urlParams.get('autoPrint')
 const textOnlyParam = urlParams.get('textOnly')
 const hiddenUIParam = urlParams.get('hideUI')
+const noBorderBoxPrintParam = urlParams.get('noBorderBoxPrint')
+const fontSizeParam = urlParams.get('fontSize')
+const fontFamilyParam = urlParams.get('fontFamily')
 if (positionListParam) {
   // base64 decode
-  newPostionListString.value = atob(positionListParam)
+  newPostionListString.value = atob(decodeURIComponent(positionListParam))
   confirmNewPostionList()
 }
 
@@ -83,10 +98,27 @@ if (hiddenUIParam === '1') {
   isHidenUI.value = true
 }
 
+if (noBorderBoxPrintParam === '1') {
+  noBorderBoxPrint.value = true
+}
+
+if (fontSizeParam === '1') {
+  const fs = Number.parseInt(fontSizeParam, 10)
+  if (!Number.isNaN(fs)) {
+    fontSize.value = fs
+  }
+}
+
+if (fontFamilyParam === '1') {
+  selectedFont.value = fontFamilyParam
+}
+
 // Computed
 const styleComputed = computed(() => ({
   background: previewUrl.value ? `url(${previewUrl.value}) no-repeat` : '#fff',
   backgroundSize: 'contain',
+  fontFamily: selectedFont.value,
+  lineHeight: lineHeight.value,
 }))
 
 const tooltipPositionStyle = computed(() => ({
@@ -94,6 +126,22 @@ const tooltipPositionStyle = computed(() => ({
 }))
 
 // Methods
+function shareLink() {
+  const baseUrl = window.location.origin + window.location.pathname
+  // console.log(baseUrl)
+  const shareUrl = new URL(baseUrl)
+  shareUrl.searchParams.set('autoPrint', '1')
+  shareUrl.searchParams.set('textOnly', isTextOnly.value ? '1' : '0')
+  shareUrl.searchParams.set('hideUI', '0')
+  shareUrl.searchParams.set('noBorderBoxPrint', noBorderBoxPrint.value ? '1' : '0')
+  shareUrl.searchParams.set('fontSize', fontSize.value.toString())
+  shareUrl.searchParams.set('fontFamily', selectedFont.value)
+  const positionsBase64 = encodeURIComponent(btoa(positionListString.value || ''))
+  shareUrl.searchParams.set('positions', positionsBase64)
+
+  navigator.clipboard.writeText(shareUrl.toString())
+  alert('Share link copied to clipboard!')
+}
 function examplePositionList(): void {
   newPostionListString.value = `[
   {
@@ -510,7 +558,7 @@ onUnmounted(() => {
           v-for="pos in positionList"
           :key="pos.no"
           class="point"
-          :style="{ left: `${pos.xMM}mm`, top: `${pos.yMM}mm`, fontSize: `${fontSize}px` }"
+          :style="{ left: `${pos.xMM}mm`, top: `${pos.yMM}mm`, fontSize: `${fontSize}px`, border: noBorderBoxPrint ? 'none' : '' }"
           :class="[isDraggingPoint && draggingPosition?.no === pos.no ? 'is-draging' : '',
                    isTextOnly ? 'text-only' : '',
           ]"
@@ -680,32 +728,48 @@ onUnmounted(() => {
           </div>
         </div>
         <div class="noprint">
-          <div class="font-resize-wrapper card-config-wrapper">
-            <div>
-              Font Size (px):
+          <div class="card-config-wrapper">
+            <div class="font-family-wrapper">
+              <div>Font:</div>
+              <div>
+                <select id="font-size-select" v-model="selectedFont" class="select" name="font-size-select">
+                  <option v-for="font in fontsList" :key="font" :value="font">
+                    {{ font }}
+                  </option>
+                </select>
+              </div>
             </div>
-            <div class="font-resize-input">
-              <input
-                v-model="fontSize"
-                type="number"
-                :min="0"
-                :max="100"
-                :step="1"
-              >
-              <input
-                v-model="fontSize"
-                type="range"
-                :min="0"
-                :max="100"
-                :step="1"
-              >
+            <div class="font-lineheight-wrapper">
+              <div>Line Height: </div>
+              <div><input v-model="lineHeight" type="text" step="0.5"></div>
             </div>
-            <button class="button" @click="fontSize = 12">
-              <!-- svg icon revert -->
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><path fill="currentColor" fill-rule="evenodd" d="M6.545.998a1 1 0 0 0 0 2h2.728a2.638 2.638 0 0 1 0 5.275H4.817V6.545a1 1 0 0 0-1.707-.707L.384 8.564a1 1 0 0 0-.22 1.09q.073.18.218.327l2.728 2.728a1 1 0 0 0 1.707-.707v-1.729h4.456a4.638 4.638 0 1 0 0-9.275z" clip-rule="evenodd" /></svg>
-            </button>
+            <div class="font-resize-wrapper ">
+              <div>
+                Font Size (px):
+              </div>
+              <div class="font-resize-input">
+                <input
+                  v-model="fontSize"
+                  type="number"
+                  :min="0"
+                  :max="100"
+                  :step="1"
+                >
+                <input
+                  v-model="fontSize"
+                  type="range"
+                  :min="0"
+                  :max="100"
+                  :step="1"
+                >
+              </div>
+              <button class="button" @click="fontSize = 12">
+                <!-- svg icon revert -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><path fill="currentColor" fill-rule="evenodd" d="M6.545.998a1 1 0 0 0 0 2h2.728a2.638 2.638 0 0 1 0 5.275H4.817V6.545a1 1 0 0 0-1.707-.707L.384 8.564a1 1 0 0 0-.22 1.09q.073.18.218.327l2.728 2.728a1 1 0 0 0 1.707-.707v-1.729h4.456a4.638 4.638 0 1 0 0-9.275z" clip-rule="evenodd" /></svg>
+              </button>
+            </div>
           </div>
-          <div class=" card-config-wrapper">
+          <div class="card-config-wrapper">
             <div class="checkbox-config-wrapper">
               <input id="no-background-checkbox" v-model="isNoBackgroundPrint" type="checkbox" name="no-background-checkbox">
               <label for="no-background-checkbox">Print without background</label>
@@ -713,6 +777,10 @@ onUnmounted(() => {
             <div class="checkbox-config-wrapper">
               <input id="show-previous-position-checkbox" v-model="isShowPreviousPosition" type="checkbox" name="no-background-checkbox">
               <label for="show-previous-position-checkbox">Show Previous Postion</label>
+            </div>
+            <div class="checkbox-config-wrapper">
+              <input id="show-previous-position-checkbox" v-model="noBorderBoxPrint" type="checkbox" name="no-background-checkbox">
+              <label for="show-previous-position-checkbox">No Border Box</label>
             </div>
           </div>
         </div>
@@ -742,6 +810,10 @@ onUnmounted(() => {
             />
           </svg>
           Copy
+        </button>
+        <button class="button icon" @click="shareLink">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M10.25 3a.75.75 0 0 1 0 1.5h-3.5A2.25 2.25 0 0 0 4.5 6.75v10.5l.012.23A2.25 2.25 0 0 0 6.75 19.5h10.5a2.25 2.25 0 0 0 2.25-2.25v-2a.75.75 0 0 1 1.5 0v2A3.75 3.75 0 0 1 17.25 21H6.75a3.75 3.75 0 0 1-3.745-3.557L3 17.25V6.75A3.75 3.75 0 0 1 6.75 3zm4.687-.932a.75.75 0 0 1 .801.113l7 6a.75.75 0 0 1 .032 1.109l-7 6.75a.75.75 0 0 1-1.27-.54v-2.976c-1.014.064-1.97.273-2.94.769c-1.136.581-2.344 1.581-3.689 3.303l-.271.354a.75.75 0 0 1-1.35-.45c0-2.857.687-5.59 2.168-7.628c1.376-1.893 3.41-3.147 6.082-3.344V2.75l.008-.109a.75.75 0 0 1 .429-.573" /></svg>
+          Share Link
         </button>
       </div>
       <textarea
@@ -1060,6 +1132,9 @@ onUnmounted(() => {
   background: var(--bg-tool-color);
   padding: 1rem;
   border-radius: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .font-resize-wrapper {
@@ -1071,6 +1146,26 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+}
+
+.font-family-wrapper {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+
+  & .select {
+    width: 200px;
+  }
+}
+
+.font-lineheight-wrapper {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+
+  & input[type="number"] {
+    width: 100px;
   }
 }
 
