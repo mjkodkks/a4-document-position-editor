@@ -103,18 +103,18 @@ if (noBorderBoxPrintParam === '1') {
   noBorderBoxPrint.value = true
 }
 
-if (fontSizeParam === '1') {
+if (fontSizeParam) {
   const fs = Number.parseInt(fontSizeParam, 10)
   if (!Number.isNaN(fs)) {
     fontSize.value = fs
   }
 }
 
-if (fontFamilyParam === '1') {
+if (fontFamilyParam) {
   selectedFont.value = fontFamilyParam
 }
 
-if (lineHeightParam === '1') {
+if (lineHeightParam) {
   lineHeight.value = lineHeightParam
 }
 
