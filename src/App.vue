@@ -782,6 +782,10 @@ onUnmounted(() => {
               <input id="show-previous-position-checkbox" v-model="noBorderBoxPrint" type="checkbox" name="no-background-checkbox">
               <label for="show-previous-position-checkbox">No Border Box</label>
             </div>
+            <div class="checkbox-config-wrapper">
+              <input id="show-previous-position-checkbox" v-model="isTextOnly" type="checkbox" name="no-background-checkbox">
+              <label for="show-previous-position-checkbox">Text Only</label>
+            </div>
           </div>
         </div>
       </div>
