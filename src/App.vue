@@ -75,6 +75,7 @@ const hiddenUIParam = urlParams.get('hideUI')
 const noBorderBoxPrintParam = urlParams.get('noBorderBoxPrint')
 const fontSizeParam = urlParams.get('fontSize')
 const fontFamilyParam = urlParams.get('fontFamily')
+const lineHeightParam = urlParams.get('lineHeight')
 if (positionListParam) {
   // base64 decode
   newPostionListString.value = atob(decodeURIComponent(positionListParam))
@@ -113,6 +114,10 @@ if (fontFamilyParam === '1') {
   selectedFont.value = fontFamilyParam
 }
 
+if (lineHeightParam === '1') {
+  lineHeight.value = lineHeightParam
+}
+
 // Computed
 const styleComputed = computed(() => ({
   background: previewUrl.value ? `url(${previewUrl.value}) no-repeat` : '#fff',
@@ -136,6 +141,7 @@ function shareLink() {
   shareUrl.searchParams.set('noBorderBoxPrint', noBorderBoxPrint.value ? '1' : '0')
   shareUrl.searchParams.set('fontSize', fontSize.value.toString())
   shareUrl.searchParams.set('fontFamily', selectedFont.value)
+  shareUrl.searchParams.set('lineHeight', lineHeight.value)
   const positionsBase64 = encodeURIComponent(btoa(positionListString.value || ''))
   shareUrl.searchParams.set('positions', positionsBase64)
 
