@@ -779,12 +779,12 @@ onUnmounted(() => {
               <label for="show-previous-position-checkbox">Show Previous Postion</label>
             </div>
             <div class="checkbox-config-wrapper">
-              <input id="show-previous-position-checkbox" v-model="noBorderBoxPrint" type="checkbox" name="no-background-checkbox">
-              <label for="show-previous-position-checkbox">No Border Box</label>
+              <input id="show-no-border-checkbox" v-model="noBorderBoxPrint" type="checkbox" name="no-background-checkbox">
+              <label for="show-no-border-checkbox">No Border Box</label>
             </div>
             <div class="checkbox-config-wrapper">
-              <input id="show-previous-position-checkbox" v-model="isTextOnly" type="checkbox" name="no-background-checkbox">
-              <label for="show-previous-position-checkbox">Text Only</label>
+              <input id="show-text-only-checkbox-checkbox" v-model="isTextOnly" type="checkbox" name="text-only-checkbox">
+              <label for="show-text-only-checkbox-checkbox">Text Only</label>
             </div>
           </div>
         </div>
