@@ -64,7 +64,7 @@ const fontsList = ref<string[]>([
   'system-ui, sans-serif',
 ])
 const selectedFont = ref(fontsList.value[0])
-const lineHeight = ref('1')
+const lineHeight = ref('normal')
 
 // Init from URL params, setting options
 const urlParams = new URLSearchParams(window.location.search)
