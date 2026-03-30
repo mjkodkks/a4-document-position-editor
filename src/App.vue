@@ -1,17 +1,19 @@
 <script setup lang="ts">
+import { useStorage } from '@vueuse/core'
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw } from 'vue'
+import { toast } from 'vue3-toastify'
 import CustomDialog from './components/CustomDialog.vue'
+import { splitToCharSpans } from './composables/print'
 
 interface Position {
   no: string | number
   name: string
   xMM: number
   yMM: number
+  value?: string
 }
 
 type PositionList = Position[]
-
-type JoyString = 'left' | 'top' | 'down' | 'right'
 
 interface PreviewImage {
   id: number
@@ -21,11 +23,13 @@ interface PreviewImage {
 
 // State
 const imageUploadRef = ref<HTMLInputElement | null>(null)
-const selectedImage = ref<File | null>(null)
-const imageList = ref<File[]>([])
-const previewUrl = ref<string | null>(null)
-const previewUrlList = ref<PreviewImage[]>([])
+const selectedImageFile = ref<File | null>(null)
+const imageFileList = ref<File[]>([])
+const currentBgImageUrl = ref<string | null>(null)
+
+const previewImageList = useStorage<PreviewImage[]>('pos-editor-previewUrlList', [])
 const selectedPreviewImage = ref<PreviewImage | null>(null)
+
 const positionList = ref<PositionList>([])
 const positionListBackup = ref<PositionList>([])
 const newPostionListString = ref<string>()
@@ -34,6 +38,21 @@ const positionListString = computed(() => {
     return ''
   }
   return JSON.stringify(positionList.value, null, 2)
+})
+const positonLIstStringNoValue = computed(() => {
+  if (!positionList.value || positionList.value.length === 0) {
+    return ''
+  }
+  return JSON.stringify(
+    positionList.value.map(pos => ({
+      no: pos.no,
+      name: pos.name,
+      xMM: pos.xMM,
+      yMM: pos.yMM,
+    })),
+    null,
+    2,
+  )
 })
 const currentPosition = reactive({ x: 0, y: 0 })
 const pageRef = ref<HTMLElement | null>(null)
@@ -48,7 +67,11 @@ const rangeMinHeight = 0
 const rangeMaxHeight = a4HeightMm
 const rangeStep = 0.5
 
-const fontSize = ref(12)
+const fontSize = ref(14)
+const fontThaiSize = ref(16)
+const fontThaiStyleComputed = computed(() => {
+  return `${fontThaiSize.value}px`
+})
 const isNoBackgroundPrint = ref(false)
 const isShowPreviousPosition = ref(true)
 const isTextOnly = ref(false)
@@ -65,6 +88,7 @@ const fontsList = ref<string[]>([
 ])
 const selectedFont = ref(fontsList.value[0])
 const lineHeight = ref('normal')
+const isCheckThaiCharacter = ref(true)
 
 // Init from URL params, setting options
 const urlParams = new URLSearchParams(window.location.search)
@@ -74,8 +98,10 @@ const textOnlyParam = urlParams.get('textOnly')
 const hiddenUIParam = urlParams.get('hideUI')
 const noBorderBoxPrintParam = urlParams.get('noBorderBoxPrint')
 const fontSizeParam = urlParams.get('fontSize')
+const fontThaiSizeParam = urlParams.get('fontThaiSize')
 const fontFamilyParam = urlParams.get('fontFamily')
 const lineHeightParam = urlParams.get('lineHeight')
+const isCheckThaiCharacterParam = urlParams.get('isCheckThaiCharacter')
 if (positionListParam) {
   // base64 decode
   newPostionListString.value = atob(decodeURIComponent(positionListParam))
@@ -110,6 +136,13 @@ if (fontSizeParam) {
   }
 }
 
+if (fontThaiSizeParam) {
+  const fs = Number.parseInt(fontThaiSizeParam, 10)
+  if (!Number.isNaN(fs)) {
+    fontThaiSize.value = fs
+  }
+}
+
 if (fontFamilyParam) {
   selectedFont.value = fontFamilyParam
 }
@@ -118,9 +151,13 @@ if (lineHeightParam) {
   lineHeight.value = lineHeightParam
 }
 
+if (isCheckThaiCharacterParam === '1') {
+  isCheckThaiCharacter.value = true
+}
+
 // Computed
 const styleComputed = computed(() => ({
-  background: previewUrl.value ? `url(${previewUrl.value}) no-repeat` : '#fff',
+  background: currentBgImageUrl.value ? `url(${currentBgImageUrl.value}) no-repeat` : '#fff',
   backgroundSize: 'contain',
   fontFamily: selectedFont.value,
   lineHeight: lineHeight.value,
@@ -141,12 +178,14 @@ function shareLink() {
   shareUrl.searchParams.set('noBorderBoxPrint', noBorderBoxPrint.value ? '1' : '0')
   shareUrl.searchParams.set('fontSize', fontSize.value.toString())
   shareUrl.searchParams.set('fontFamily', selectedFont.value)
+  shareUrl.searchParams.set('fontThaiSize', fontThaiSize.value.toString())
   shareUrl.searchParams.set('lineHeight', lineHeight.value)
   const positionsBase64 = encodeURIComponent(btoa(positionListString.value || ''))
   shareUrl.searchParams.set('positions', positionsBase64)
+  shareUrl.searchParams.set('isCheckThaiCharacter', isCheckThaiCharacter.value ? '1' : '0')
 
   navigator.clipboard.writeText(shareUrl.toString())
-  alert('Share link copied to clipboard!')
+  toast.success('Share link copied to clipboard!')
 }
 function examplePositionList(): void {
   newPostionListString.value = `[
@@ -176,8 +215,8 @@ async function uploadChange(evt: Event) {
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i]
-    const currentIndex = imageList.value.length
-    imageList.value.push(file)
+    const currentIndex = imageFileList.value.length
+    imageFileList.value.push(file)
 
     const promise = new Promise<PreviewImage>((resolve) => {
       const reader = new FileReader()
@@ -195,21 +234,21 @@ async function uploadChange(evt: Event) {
   }
 
   const results = await Promise.all(fileReaderPromises)
-  previewUrlList.value.push(...results)
+  previewImageList.value.push(...results)
 
   // Auto-select first image if nothing is selected
-  if (!selectedPreviewImage.value && previewUrlList.value.length > 0) {
-    selectedImage.value = imageList.value.at(0) || null
-    selectedPreviewImage.value = previewUrlList.value.at(0) || null
-    previewUrl.value = previewUrlList.value.at(0)?.url || null
+  if (!selectedPreviewImage.value && previewImageList.value.length > 0) {
+    selectedImageFile.value = imageFileList.value.at(0) || null
+    selectedPreviewImage.value = previewImageList.value.at(0) || null
+    currentBgImageUrl.value = previewImageList.value.at(0)?.url || null
   }
 }
 
 function selectPreview(id: number) {
-  const selected = previewUrlList.value.find(img => img.id === id)
+  const selected = previewImageList.value.find(img => img.id === id)
   if (selected) {
     selectedPreviewImage.value = selected
-    previewUrl.value = selected.url
+    currentBgImageUrl.value = selected.url
   }
 }
 
@@ -248,6 +287,7 @@ function confirmNewPostionList(option?: { closeDialog?: boolean }): void {
         name: pos?.name || '',
         xMM: +pos?.xMM || 0,
         yMM: +pos?.yMM || 0,
+        value: pos?.value || '',
       })
     })
     positionList.value = template
@@ -259,35 +299,14 @@ function confirmNewPostionList(option?: { closeDialog?: boolean }): void {
   }
 }
 
-const joyClickInterval = ref<number | null>(null)
-// const joyHoldDuration = 200
-function movePostionJoy(key: JoyString, currentPos: Position): void {
-  switch (key) {
-    case 'left':
-      currentPos.xMM = currentPos.xMM - rangeStep
-      break
-    case 'top':
-      currentPos.yMM = currentPos.yMM - rangeStep
-      break
-    case 'down':
-      currentPos.yMM = currentPos.yMM + rangeStep
-      break
-    case 'right':
-      currentPos.xMM = currentPos.xMM + rangeStep
-  }
-}
-
-function clearHoldJoy() {
-  joyClickInterval.value && clearTimeout(joyClickInterval.value)
-}
 function reset(): void {
   if (!confirm('Are you sure to reset all?'))
     return
-  selectedImage.value = null
-  previewUrl.value = null
+  selectedImageFile.value = null
+  currentBgImageUrl.value = null
   selectedPreviewImage.value = null
-  imageList.value = []
-  previewUrlList.value = []
+  imageFileList.value = []
+  previewImageList.value = []
   if (imageUploadRef.value) {
     imageUploadRef.value.value = ''
   }
@@ -318,14 +337,18 @@ function copyPosition(text: string) {
   if (!navigator.clipboard) {
     /* not supported */
   }
-  navigator.clipboard.writeText(text)
-  alert('copy success!')
+
+  navigator.clipboard.writeText(text).catch((err) => {
+    console.error(err)
+  })
+
+  toast.success('Copied to clipboard!')
 }
 
 const onMouseMoveDebounce = debounce(onMouseMovePage, 200)
 
 function onMouseMovePage(evt: MouseEvent): void {
-  if (!pageRef.value || !selectedImage.value)
+  if (!pageRef.value || !selectedPreviewImage.value)
     return
   const { xMM, yMM } = calculatePositionFromEvent(evt) || {
     xMM: 0,
@@ -336,7 +359,7 @@ function onMouseMovePage(evt: MouseEvent): void {
 }
 
 function onMouseOverPage(): void {
-  if (!pageRef.value || !selectedImage.value)
+  if (!pageRef.value || !selectedPreviewImage.value)
     return
   showTooltip.value = true
 }
@@ -344,7 +367,7 @@ function onMouseOverPage(): void {
 // click to add position
 function onMouseDownPage(evt: MouseEvent): void {
   evt.preventDefault()
-  if (!pageRef.value || !selectedImage.value)
+  if (!pageRef.value || !selectedPreviewImage.value)
     return
 
   if (evt.button === 2) {
@@ -377,7 +400,7 @@ function onMouseOutPage(evt: MouseEvent): void {
 function calculatePositionFromEvent(
   evt: MouseEvent,
 ): { xMM: number, yMM: number } | undefined {
-  if (!pageRef.value || !selectedImage.value)
+  if (!pageRef.value || !selectedPreviewImage.value)
     return
   const pageWidth = pageRef.value.clientWidth
   const pageHeight = pageRef.value.clientHeight
@@ -394,7 +417,7 @@ function calculatePositionFromEvent(
 }
 
 function calculateTooltipPosition(evt: MouseEvent): { x: number, y: number } {
-  if (!pageRef.value || !selectedImage.value)
+  if (!pageRef.value || !selectedPreviewImage.value)
     return { x: 0, y: 0 }
   const offsetXY = 14
   // print all position event
@@ -432,7 +455,7 @@ function onMouseDownPoint(evt: MouseEvent, pos: Position): void {
 function onGlobalMouseMove(evt: MouseEvent): void {
   if (!isDraggingPoint.value || !draggingPosition.value)
     return
-  if (!pageRef.value || !selectedImage.value)
+  if (!pageRef.value || !selectedPreviewImage.value)
     return
 
   evt.preventDefault()
@@ -444,7 +467,7 @@ function onGlobalMouseMove(evt: MouseEvent): void {
 function calculatePositionBoxFromEvent(
   evt: MouseEvent,
 ): { xMM: number, yMM: number } | undefined {
-  if (!pageRef.value || !selectedImage.value)
+  if (!pageRef.value || !selectedPreviewImage.value)
     return
   const pageWidth = pageRef.value.clientWidth
   const pageHeight = pageRef.value.clientHeight
@@ -477,11 +500,25 @@ function windowsMouseMove(evt: MouseEvent): void {
   tooltipPosition.y = y
 }
 
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (previewImageList.value.length > 0) {
+    e.preventDefault()
+  }
+}
+
+// Restore last uploaded image
+if (previewImageList.value.length > 0) {
+  if (autoPrint !== '1') {
+    toast.success('Found last upload image already restored.')
+  }
+}
+
 onMounted(() => {
   if (pageRef?.value) {
     // for tooltip position
     pageRef.value.addEventListener('mousemove', windowsMouseMove)
   }
+  window.addEventListener('beforeunload', handleBeforeUnload)
 })
 
 onUnmounted(() => {
@@ -489,6 +526,7 @@ onUnmounted(() => {
     // for tooltip position
     pageRef.value.removeEventListener('mousemove', windowsMouseMove)
   }
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 </script>
 
@@ -518,12 +556,12 @@ onUnmounted(() => {
           multiple
           @change="uploadChange"
         >
-        <button v-if="selectedImage" class="button reset-btn" @click="reset">
+        <button v-if="imageFileList.length > 0 || previewImageList.length > 0" class="button reset-btn" @click="reset">
           RESET
         </button>
       </div>
-      <div v-if="previewUrlList.length > 0" class="image-upload-card-wrapper noprint">
-        <div v-for="(image) in previewUrlList" :key="image.id" class="image-upload-card">
+      <div v-if="previewImageList.length > 0" class="image-upload-card-wrapper noprint">
+        <div v-for="(image) in previewImageList" :key="image.id" class="image-upload-card">
           <div class="file-name-card" :title="image.name">
             {{ image.name }}
           </div>
@@ -557,22 +595,43 @@ onUnmounted(() => {
             class="point backup noprint"
             :style="{ left: `${pos.xMM}mm`, top: `${pos.yMM}mm`, fontSize: `${fontSize}px` }"
           >
-            {{ pos.no }}) {{ pos?.name }}
+            {{ pos?.name }}
           </div>
         </template>
-        <div
-          v-for="pos in positionList"
-          :key="pos.no"
-          class="point"
-          :style="{ left: `${pos.xMM}mm`, top: `${pos.yMM}mm`, fontSize: `${fontSize}px`, border: noBorderBoxPrint ? 'none' : '' }"
-          :class="[isDraggingPoint && draggingPosition?.no === pos.no ? 'is-draging' : '',
-                   isTextOnly ? 'text-only' : '',
-          ]"
-          :title="`(${pos.xMM}mm, ${pos.yMM}mm)`"
-          @mousedown="onMouseDownPoint($event, pos)"
-        >
-          {{ pos.no }}) {{ pos?.name }}
-        </div>
+        <template v-if="isCheckThaiCharacter">
+          <div
+            v-for="pos in positionList"
+            :key="pos.no"
+            class="point"
+            :style="{ left: `${pos.xMM}mm`, top: `${pos.yMM}mm`, fontSize: `${fontSize}px`, outline: noBorderBoxPrint ? 'none' : '' }"
+            :class="[isDraggingPoint && draggingPosition?.no === pos.no ? 'is-draging' : '',
+                     isTextOnly ? 'text-only' : '',
+            ]"
+            :title="`(${pos.xMM}mm, ${pos.yMM}mm)`"
+            @mousedown="onMouseDownPoint($event, pos)"
+          >
+            <span
+              v-for="(segment, idx) in splitToCharSpans(pos?.value || pos?.name || '')"
+              :key="idx"
+              :class="{ 'font-size-th': segment.isThai }"
+            >{{ segment.char }}</span>
+          </div>
+        </template>
+        <template v-else>
+          <div
+            v-for="pos in positionList"
+            :key="pos.no"
+            class="point"
+            :style="{ left: `${pos.xMM}mm`, top: `${pos.yMM}mm`, fontSize: `${fontSize}px`, outline: noBorderBoxPrint ? 'none' : '' }"
+            :class="[isDraggingPoint && draggingPosition?.no === pos.no ? 'is-draging' : '',
+                     isTextOnly ? 'text-only' : '',
+            ]"
+            :title="`(${pos.xMM}mm, ${pos.yMM}mm)`"
+            @mousedown="onMouseDownPoint($event, pos)"
+          >
+            {{ pos.no }} {{ pos?.name }}
+          </div>
+        </template>
       </div>
       <div v-show="showTooltip" class="tooltip" :style="tooltipPositionStyle">
         ({{ currentPosition.x }}mm, {{ currentPosition.y }}mm)
@@ -582,7 +641,7 @@ onUnmounted(() => {
           <div class="label noprint">
             POSITION LIST
           </div>
-          <button class="button" :disabled="!selectedImage" @click="showDialog">
+          <button class="button" :disabled="!selectedPreviewImage" @click="showDialog">
             IMPORT POSITIONS
           </button>
           <button class="button reset-label-btn" :disabled="positionList.length <= 0" @click="resetPositionList">
@@ -592,9 +651,10 @@ onUnmounted(() => {
         <div class="card-header">
           <div>No</div>
           <div>Name</div>
+          <div>Value</div>
           <div>X(mm)</div>
           <div>Y(mm)</div>
-          <div>Joypad</div>
+          <div />
           <div />
         </div>
         <div class="card-list">
@@ -609,6 +669,9 @@ onUnmounted(() => {
             <div class="card-name">
               <input v-model="card.name" type="text">
             </div>
+            <div class="card-name">
+              <textarea v-model="card.value" rows="1" style="resize: auto;" />
+            </div>
             <div class="card-input">
               <input
                 v-model="card.xMM"
@@ -640,90 +703,6 @@ onUnmounted(() => {
                 :max="rangeMaxHeight"
                 :step="rangeStep"
               >
-            </div>
-            <div class="joystick">
-              <button
-                @mousedown="movePostionJoy('left', card)"
-                @mouseup="clearHoldJoy"
-                @mouseout="clearHoldJoy"
-              >
-                <svg
-                  name="arrow-left"
-                  role="button"
-                  style="transform: rotate(270deg)"
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="1em"
-                  height="1em"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    fill="currentColor"
-                    d="M3 19h18a1.002 1.002 0 0 0 .823-1.569l-9-13c-.373-.539-1.271-.539-1.645 0l-9 13A.999.999 0 0 0 3 19"
-                  />
-                </svg>
-              </button>
-              <div class="middle">
-                <button
-                  @mousedown="movePostionJoy('top', card)"
-                  @mouseup="clearHoldJoy"
-                  @mouseout="clearHoldJoy"
-                >
-                  <svg
-                    name="arrow-top"
-                    role="button"
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="1em"
-                    height="1em"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      fill="currentColor"
-                      d="M3 19h18a1.002 1.002 0 0 0 .823-1.569l-9-13c-.373-.539-1.271-.539-1.645 0l-9 13A.999.999 0 0 0 3 19"
-                    />
-                  </svg>
-                </button>
-                <div class="ball" />
-                <button
-                  @mousedown="movePostionJoy('down', card)"
-                  @mouseup="clearHoldJoy"
-                  @mouseout="clearHoldJoy"
-                >
-                  <svg
-                    name="arrow-down"
-                    role="button"
-                    style="transform: rotate(180deg)"
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="1em"
-                    height="1em"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      fill="currentColor"
-                      d="M3 19h18a1.002 1.002 0 0 0 .823-1.569l-9-13c-.373-.539-1.271-.539-1.645 0l-9 13A.999.999 0 0 0 3 19"
-                    />
-                  </svg>
-                </button>
-              </div>
-              <button
-                @mousedown="movePostionJoy('right', card)"
-                @mouseup="clearHoldJoy"
-                @mouseout="clearHoldJoy"
-              >
-                <svg
-                  name="arrow-right"
-                  role="button"
-                  style="transform: rotate(90deg)"
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="1em"
-                  height="1em"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    fill="currentColor"
-                    d="M3 19h18a1.002 1.002 0 0 0 .823-1.569l-9-13c-.373-.539-1.271-.539-1.645 0l-9 13A.999.999 0 0 0 3 19"
-                  />
-                </svg>
-              </button>
             </div>
             <button
               class="card-remove button"
@@ -774,6 +753,30 @@ onUnmounted(() => {
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><path fill="currentColor" fill-rule="evenodd" d="M6.545.998a1 1 0 0 0 0 2h2.728a2.638 2.638 0 0 1 0 5.275H4.817V6.545a1 1 0 0 0-1.707-.707L.384 8.564a1 1 0 0 0-.22 1.09q.073.18.218.327l2.728 2.728a1 1 0 0 0 1.707-.707v-1.729h4.456a4.638 4.638 0 1 0 0-9.275z" clip-rule="evenodd" /></svg>
               </button>
             </div>
+            <div v-if="isCheckThaiCharacter" class="font-resize-wrapper">
+              <div>
+                Font Size TH (px):
+              </div>
+              <div class="font-resize-input">
+                <input
+                  v-model="fontThaiSize"
+                  type="number"
+                  :min="0"
+                  :max="100"
+                  :step="1"
+                >
+                <input
+                  v-model="fontThaiSize"
+                  type="range"
+                  :min="0"
+                  :max="100"
+                  :step="1"
+                >
+              </div>
+              <button class="button" @click="fontThaiSize = 14">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><path fill="currentColor" fill-rule="evenodd" d="M6.545.998a1 1 0 0 0 0 2h2.728a2.638 2.638 0 0 1 0 5.275H4.817V6.545a1 1 0 0 0-1.707-.707L.384 8.564a1 1 0 0 0-.22 1.09q.073.18.218.327l2.728 2.728a1 1 0 0 0 1.707-.707v-1.729h4.456a4.638 4.638 0 1 0 0-9.275z" clip-rule="evenodd" /></svg>
+              </button>
+            </div>
           </div>
           <div class="card-config-wrapper">
             <div class="checkbox-config-wrapper">
@@ -792,6 +795,10 @@ onUnmounted(() => {
               <input id="show-text-only-checkbox-checkbox" v-model="isTextOnly" type="checkbox" name="text-only-checkbox">
               <label for="show-text-only-checkbox-checkbox">Text Only</label>
             </div>
+            <div class="checkbox-config-wrapper">
+              <input id="show-text-only-checkbox-checkbox" v-model="isCheckThaiCharacter" type="checkbox" name="isCheckThaiCharacter-checkbox">
+              <label for="show-text-only-checkbox-checkbox">Check Thai Character</label>
+            </div>
           </div>
         </div>
       </div>
@@ -804,7 +811,7 @@ onUnmounted(() => {
         <button
           class="button icon"
           :disabled="!positionListString"
-          @click="copyPosition(positionListString)"
+          @click="copyPosition(positonLIstStringNoValue)"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -828,7 +835,7 @@ onUnmounted(() => {
       </div>
       <textarea
         id="json-list"
-        v-model="positionListString"
+        v-model="positonLIstStringNoValue"
         name="json-list"
         cols="30"
         rows="10"
@@ -874,6 +881,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+body {
+    font-size: 14px;
+}
+
 .main {
   display: grid;
   grid-template-columns: 3fr 2fr;
@@ -905,10 +916,10 @@ onUnmounted(() => {
   width: fit-content;
   background-color: black;
   color: white;
-  padding: 0 0.5rem;
-  font-size: 0.75rem;
+  padding: 0 .5rem;
+  font-size: .75rem;
   font-weight: 600;
-  border-radius: 0.5rem 0.5rem 0 0;
+  border-radius: .5rem .5rem 0 0;
   align-content: center;
   height: 32px;
 }
@@ -965,7 +976,7 @@ onUnmounted(() => {
   }
 
   & .file-name-card {
-    font-size: 0.75rem;
+    font-size: .75rem;
     text-align: center;
     max-width: 100px;
     overflow: hidden;
@@ -981,12 +992,12 @@ onUnmounted(() => {
   }
 
   & img {
-    outline: solid 0.5px var(--primary-color);
+    outline: solid .5008px var(--primary-color);
   }
 
   & .selected {
     outline: solid 2px var(--primary-color);
-    border-radius: 0.5rem;
+    border-radius: .5rem;
     transition: all 0.3s;
     border-radius: 4px;
   }
@@ -1000,12 +1011,12 @@ onUnmounted(() => {
   min-width: 20px;
   padding: 2px;
   height: auto;
-  font-size: 0.75rem;
+  font-size: .75rem;
   text-align: center;
   background: red;
   position: absolute;
   color: #fff;
-  border-radius: 0.2rem;
+  border-radius: .2rem;
   cursor: grab;
   z-index: 1;
 }
@@ -1018,15 +1029,15 @@ onUnmounted(() => {
 }
 
 .card-wrapper {
-  --w-col1: 60px;
+  --w-col1: 40px;
   --w-col2: 1fr;
-  --w-col3: 60px;
+  --w-col3: 1fr;
   --w-col4: 60px;
   --w-col5: 60px;
   --w-col6: 60px;
   --w-max-width: 100%;
-  --row-gap: 0.5rem;
-  padding-right: 0.5rem;
+  --row-gap: .5rem;
+  padding-right: .5rem;
 
   & .card-header {
     display: grid;
@@ -1040,14 +1051,15 @@ onUnmounted(() => {
     font-size: 1rem;
     height: 40px;
     max-width: var(--w-max-width);
-    gap: var(--row-gap);
+    column-gap: var(--row-gap);
     color: white;
     text-transform: capitalize;
 
     & div {
       display: flex;
-      justify-content: center;
+      justify-content: left;
       align-items: center;
+      padding: 0 .5rem;
     }
   }
 
@@ -1055,15 +1067,15 @@ onUnmounted(() => {
     --height: 46px;
     display: flex;
     flex-direction: column;
-    gap: 0.8rem;
+    gap: .8rem;
     overflow: auto;
     resize: vertical;
-    padding: 0.5rem 0;
+    padding: .5rem 0;
     max-width: var(--w-max-width);
     background: var(--bg-tool-color);
     height: 60dvh;
     width: var(--w-max-width);
-    border-radius: 0 0 0.5rem 0.5rem;
+    border-radius: 0 0 .5rem .5rem;
     /* box-shadow: 0 0 10px 0 rgba(0, 0, 0, 0.5); */
 
     & .card {
@@ -1088,6 +1100,13 @@ onUnmounted(() => {
       }
     }
 
+    & .card-value {
+      & textarea {
+        width: 100%;
+        resize: vertical;
+      }
+    }
+
     & .card-input {
       display: flex;
       flex-direction: column;
@@ -1100,38 +1119,6 @@ onUnmounted(() => {
   }
 }
 
-.joystick {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 1fr;
-  align-items: center;
-  align-self: center;
-  justify-items: center;
-
-  & svg {
-    cursor: pointer;
-    transition: all 0.3s;
-
-    &:hover {
-      color: red;
-    }
-  }
-
-  & .middle {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-  }
-
-  & .ball {
-    height: 8px;
-    width: 8px;
-    background-color: #fff;
-    border-radius: 50%;
-  }
-}
-
 .is-draging {
   background-color: blue !important;
   cursor: grabbing;
@@ -1141,10 +1128,10 @@ onUnmounted(() => {
   margin-top: 1rem;
   background: var(--bg-tool-color);
   padding: 1rem;
-  border-radius: 0.5rem;
+  border-radius: .5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: .5rem;
 }
 
 .font-resize-wrapper {
@@ -1206,9 +1193,13 @@ onUnmounted(() => {
 .text-only {
   background-color: transparent !important;
   color: black !important;
-  border: solid 1px;
+  outline: solid 1px;
   text-shadow: none !important;
   padding: 0 !important;
+}
+
+.font-size-th {
+  font-size: v-bind(fontThaiStyleComputed) !important;
 }
 
 @media screen and (max-width: 1200px) {
