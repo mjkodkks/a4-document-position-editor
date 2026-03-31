@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useStorage } from '@vueuse/core'
+import { Base64 } from 'js-base64'
 import { computed, onMounted, onUnmounted, reactive, ref, toRaw } from 'vue'
 import { toast } from 'vue3-toastify'
 import CustomDialog from './components/CustomDialog.vue'
@@ -104,7 +105,7 @@ const lineHeightParam = urlParams.get('lineHeight')
 const isCheckThaiCharacterParam = urlParams.get('isCheckThaiCharacter')
 if (positionListParam) {
   // base64 decode
-  newPostionListString.value = atob(decodeURIComponent(positionListParam))
+  newPostionListString.value = Base64.decode(positionListParam)
   confirmNewPostionList()
 }
 
@@ -180,7 +181,7 @@ function shareLink() {
   shareUrl.searchParams.set('fontFamily', selectedFont.value)
   shareUrl.searchParams.set('fontThaiSize', fontThaiSize.value.toString())
   shareUrl.searchParams.set('lineHeight', lineHeight.value)
-  const positionsBase64 = encodeURIComponent(btoa(positionListString.value || ''))
+  const positionsBase64 = Base64.encode(positionListString.value || '')
   shareUrl.searchParams.set('positions', positionsBase64)
   shareUrl.searchParams.set('isCheckThaiCharacter', isCheckThaiCharacter.value ? '1' : '0')
 
